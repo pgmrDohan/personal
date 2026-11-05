@@ -1,0 +1,690 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DEPS: jsdom@29.1.1 html-minifier-terser@7.2.0 sharp@0.35.5
+      TZ: Asia/Seoul
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Cache dependencies
+        id: deps
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/deps
+          key: deps-${{ runner.os }}-${{ env.DEPS }}
+
+      - name: Install dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: npm install --prefix "$RUNNER_TEMP/deps" --no-save --no-audit --no-fund $DEPS
+
+      - name: Cache images
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/image-cache
+          key: images-${{ hashFiles('images/**') }}
+          restore-keys: images-
+
+      - name: Build
+        run: |
+          node --input-type=module <<'EOF'
+          import { execFileSync } from "node:child_process";
+          import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+          import { createHash } from "node:crypto";
+          import { createRequire } from "node:module";
+          import { availableParallelism } from "node:os";
+          import { basename, dirname } from "node:path";
+
+          const TEMP = process.env.RUNNER_TEMP;
+          const require = createRequire(`${TEMP}/deps/`);
+          const { JSDOM } = require("jsdom");
+          const { minify } = require("html-minifier-terser");
+          const sharp = require("sharp");
+          const LIB = ".github/workflows/lib";
+          const read = (path) => readFileSync(path, "utf8");
+          const json = (path) => JSON.parse(read(path));
+          const SITE = `https://${read("CNAME").trim()}`;
+          const DESCRIPTION = "The programmer, like the poet, works only slightly removed from pure thought-stuff. (...) Yet the program construct, unlike the poet's words, is real in the sense that it moves and works.";
+          const routes = json("site.json");
+          const LANGS = Object.fromEntries(Object.entries(json(`${LIB}/languages.json`)).flatMap(([lang, exts]) => exts.map((ext) => [ext, lang])));
+          const extOf = (path) => /\.([^./]+)$/.exec(path)?.[1].toLowerCase();
+          const langOf = (path) => LANGS[extOf(path)];
+          const fail = (code, detail) => {
+            throw new Error(`시스템 오류. ${code} (${detail})`);
+          };
+          const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+          const quote = (v) => (/^[^\s"'=<>`&]+$/.test((v = String(v))) ? v : `"${esc(v)}"`);
+          const attr = (key, value) => ` ${key}=${quote(value)}`;
+          const dirHref = (dir) => (dir ? `/${encodeURI(dir)}/` : "/");
+          const newest = (dates) => dates.reduce((a, b) => (b && !(a >= b) ? b : a), undefined);
+          const titleOf = (text) =>
+            text
+              .replace(/\r/g, "")
+              .replace(/^(```|~~~)[^]*?^\1[^\S\n]*$/gm, "")
+              .match(/^#[^\S\n]+(.+?)(?:[^\S\n]+#+)?[^\S\n]*$/m)?.[1];
+          const scan = (dir) =>
+            readdirSync(dir, { withFileTypes: true })
+              .filter((d) => d.name[0] !== ".")
+              .flatMap((d) => (d.isDirectory() ? scan(`${dir}/${d.name}`) : [`${dir}/${d.name}`]));
+          const SCHEME = /^[a-z][a-z\d+.-]*:/i;
+          const local = (entries) =>
+            entries.flatMap((e) => (typeof e === "string" ? [e] : e.entries ? local(e.entries) : [e.href])).filter((href) => !SCHEME.test(href));
+
+          const log = execFileSync("git", ["log", "-z", "--format=%x01%ct%x02%H%x02%(trailers:key=Date,valueonly,separator=%x01)", "--name-status", "-M100%"], {
+            encoding: "utf8",
+            maxBuffer: 1 << 30,
+          }).split("\0");
+          const pin = (value, hash) => {
+            const [, y, m, d] = /^(\d{4})-(\d\d)-(\d\d)$/.exec(value) ?? [];
+            const time = Date.UTC(y, m - 1, d) / 1000;
+            if (new Date(time * 1000).getUTCDate() === +d) return time;
+            console.log(`::warning::시스템 오류. 36 (${hash.slice(0, 7)}: ${value})`);
+          };
+          const commits = [];
+          for (let i = 0; i < log.length; i++) {
+            const token = log[i].replace(/^\n/, "");
+            if (token[0] === "\x01") {
+              const [time, hash, trailers] = token.slice(1).split("\x02");
+              const value = trailers.split("\x01").at(-1).trim();
+              commits.push({ time: +time, date: value ? pin(value, hash) : undefined, changes: [] });
+            } else if (token) commits.at(-1).changes.push([token[0], ...log.slice(i + 1, (i += token[0] === "R" ? 2 : 1) + 1)]);
+          }
+          const touched = new Set();
+          for (const { time, changes } of commits)
+            for (const [, ...paths] of changes)
+              for (const path of paths) if (!touched.has(path) && touched.add(path) && existsSync(path)) utimesSync(path, time, time);
+          const added = {};
+          const pinned = {};
+          for (const { time, date, changes } of commits.toReversed())
+            for (const [status, from, to] of changes) {
+              if (status === "A") {
+                added[from] ??= time;
+                delete pinned[from];
+              } else if (status === "R") {
+                added[to] = added[from] ?? time;
+                pinned[to] = pinned[from];
+                delete pinned[from];
+              } else if (status === "D") delete pinned[from];
+              if (date && (status === "A" || status === "M")) pinned[from] = date;
+            }
+          const born = (path) => (langOf(path) === "markdown" && pinned[path]) || added[path];
+
+          const CACHE = `${TEMP}/image-cache`;
+          const FORMATS = [
+            ["avif", "image/avif", (png) => (png ? { quality: 60, chromaSubsampling: "4:4:4" } : { quality: 50 })],
+            ["webp", "image/webp", (png) => (png ? { lossless: true } : { quality: 80 })],
+          ];
+          mkdirSync(CACHE, { recursive: true });
+          const cached = new Set();
+          const variants = {};
+          const queue = existsSync("images") ? scan("images").filter((path) => /\.(png|jpe?g)$/i.test(path)) : [];
+          await Promise.all(
+            Array.from({ length: availableParallelism() }, async () => {
+              for (let path; (path = queue.shift()); ) {
+                const input = readFileSync(path);
+                const { mtime } = statSync(path);
+                for (const [ext, type, options] of FORMATS) {
+                  const out = path.replace(/\.[^./]+$/, `.${ext}`);
+                  if (existsSync(out)) continue;
+                  const opts = options(/\.png$/i.test(path));
+                  const name = `${createHash("sha256").update(input).update(JSON.stringify([ext, opts])).digest("hex")}.${ext}`;
+                  cached.add(name);
+                  if (!existsSync(`${CACHE}/${name}`)) writeFileSync(`${CACHE}/${name}`, await sharp(input).rotate()[ext](opts).toBuffer());
+                  if (statSync(`${CACHE}/${name}`).size >= input.length) continue;
+                  copyFileSync(`${CACHE}/${name}`, out);
+                  utimesSync(out, mtime, mtime);
+                  (variants[path] ??= []).push([type, out]);
+                }
+              }
+            }),
+          );
+          for (const name of readdirSync(CACHE)) if (!cached.has(name)) unlinkSync(`${CACHE}/${name}`);
+
+          const DIRS = local(routes)
+            .filter((href) => href.endsWith("/"))
+            .map((href) => href.slice(0, -1));
+          const README = {};
+          for (const dir of ["", ...DIRS]) if (existsSync(dir ? `${dir}/README.md` : "README.md")) README[dir] = dir ? `${dir}/README.md` : "README.md";
+          const INDEX = Object.fromEntries(Object.entries(README).map(([dir, path]) => [path, dir]));
+          const pageOf = (path) => INDEX[path] ?? path.replace(/\.[^./]+$/, "");
+
+          const FILES = { "": local(routes).filter((href) => !href.endsWith("/")) };
+          for (const dir of DIRS) FILES[dir] = scan(dir);
+          const mtime = (path) => statSync(path).mtime;
+          const pages = new Map();
+          const add = (path, time, src) => {
+            const page = pages.get(path) ?? pages.set(path, {}).get(path);
+            if (!(page.time >= time)) page.time = time;
+            if (src) page.src = src;
+          };
+          for (const [dir, files] of Object.entries(FILES)) {
+            const shown = (dir ? files : [...Object.values(FILES).flat(), "site.json"]).filter((path) => existsSync(path));
+            add(dir, newest(shown.map(mtime)) ?? mtime(dir || "."));
+            for (const path of files) if (langOf(path) && existsSync(path)) add(pageOf(path), mtime(path), path);
+          }
+          const urls = [...pages].sort(([a], [b]) => a.localeCompare(b));
+          const iso = (d) => d.toISOString().replace(/\.\d+Z$/, "Z");
+          writeFileSync(
+            "sitemap.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+              urls.map(([path, { time }]) => `<url><loc>${esc(SITE + dirHref(path))}</loc><lastmod>${iso(time)}</lastmod></url>`).join("") +
+              "</urlset>\n",
+          );
+          const lastmod = newest(urls.map(([, { time }]) => time));
+          utimesSync("sitemap.xml", lastmod, lastmod);
+
+          const summary = (text, md) => {
+            const block = text
+              .replace(/\r/g, "")
+              .split(/\n\s*\n/)
+              .map((b) => b.trim())
+              .find((b) => b && !(md && /^(#|```|---|===|\||<|\$\$|\\\[|!\[)/.test(b)));
+            if (!block) return "";
+            const plain = (
+              md
+                ? block
+                    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+                    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+                    .replace(/^\s*(?:[-+*]|\d+\.|>)\s+/gm, "")
+                    .replace(/[*~`]/g, "")
+                    .replace(/(?<![\p{L}\p{N}])_+|_+(?![\p{L}\p{N}])/gu, "")
+                    .replace(/\\(.)/g, "$1")
+                : block
+            )
+              .replace(/\s+/g, " ")
+              .trim();
+            return plain.length > 200 ? `${plain.slice(0, 199)}…` : plain;
+          };
+          const descriptions = new Map();
+          const items = urls
+            .map(([path, { time, src }]) => {
+              const url = esc(SITE + dirHref(path));
+              if (!src) return { url, title: path ? `${basename(path)}/` : "/", date: time };
+              const md = langOf(src) === "markdown";
+              const text = read(src);
+              const description = summary(text, md);
+              if (description) descriptions.set(src, description);
+              return {
+                url,
+                title: (md && titleOf(text)) || basename(src).replace(/\.[^.]+$/, ""),
+                date: born(src) ? new Date(born(src) * 1000) : mtime(src),
+                description: description && `<description>${esc(description)}</description>`,
+              };
+            })
+            .sort((a, b) => b.date - a.date);
+          writeFileSync(
+            "rss.xml",
+            '<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel>' +
+              `<title>~/journals/*</title><link>${SITE}/</link><description>${esc(DESCRIPTION)}</description><language>ko</language>` +
+              `<atom:link href="${SITE}/rss.xml" rel="self" type="application/rss+xml"/><image><url>${SITE}/cover.jpg</url><title>~/journals/*</title><link>${SITE}/</link></image>` +
+              (items.length ? `<lastBuildDate>${items[0].date.toUTCString()}</lastBuildDate>` : "") +
+              items
+                .map(
+                  (i) =>
+                    `<item><title>${esc(i.title)}</title><link>${i.url}</link>${i.description ?? ""}<dc:creator>Dohan Kwon</dc:creator>` +
+                    `<guid isPermaLink="true">${i.url}</guid><pubDate>${i.date.toUTCString()}</pubDate></item>`,
+                )
+                .join("") +
+              "</channel></rss>\n",
+          );
+          if (items.length) utimesSync("rss.xml", items[0].date, items[0].date);
+
+          const HTML = {
+            collapseWhitespace: true,
+            conservativeCollapse: true,
+            removeAttributeQuotes: true,
+            removeOptionalTags: true,
+            collapseBooleanAttributes: true,
+            decodeEntities: true,
+            removeRedundantAttributes: true,
+            sortAttributes: true,
+            sortClassName: true,
+          };
+          const FEATURE_CSS = [
+            ["math", "/styles/math.css"],
+            ["pre", "/styles/prism.css"],
+            ["pre > code.language-treeview", "/styles/prism-treeview.css"],
+          ];
+          const CLASSES = {
+            cdata: "c", comment: "c", doctype: "c", prolog: "c",
+            punctuation: "p",
+            namespace: "m",
+            atrule: "k", keyword: "k", operator: "k", rule: "k", important: "k w",
+            "attr-value": "s", char: "s", regex: "s", string: "s", tag: "s", "template-string": "s", url: "s",
+            number: "u", unit: "u",
+            boolean: "v", builtin: "v", constant: "v", property: "v", symbol: "v", variable: "v", entity: "v b",
+            "attr-name": "f", "class-name": "f", function: "f", selector: "f",
+            parameter: "a",
+            list: "t", title: "t w",
+            inserted: "i",
+            deleted: "d",
+            bold: "w",
+            italic: "y",
+            tab: "q", cr: "n", crlf: "z", lf: "l", space: "x",
+            "line-numbers": "g", "line-numbers-rows": "r",
+            "entry-line": "o", "line-h": "h", "line-v": "j", "line-v-last": "jl",
+            "entry-name": "e", dir: "e2", dotfile: "ed",
+            "math-core-error": "me", "math-core-unknown-cmd": "mc",
+            "menclose-phasorangle": "mp", "menclose-updiagonalstrike": "mu", "menclose-downdiagonalstrike": "md",
+          };
+          const GLYPHS = [
+            ["e3", "bmp eps gif jpe jpeg jpg png svg tiff"],
+            ["e6", "cfg conf config csv ini log md nfo txt"],
+            ["e7", "asp aspx c cc cpp cs css h hh htm html jav java js php rb xml"],
+            ["e8", "7z bz2 bz gz rar tar tgz zip"],
+            ["e4", "aac au cda flac mp3 oga ogg wav wma"],
+            ["e5", "avi flv mkv mov mp4 mpeg mpg ogv webm"],
+            ["e9", "pdf"],
+            ["ea", "xls xlsx"],
+            ["ec", "doc docm docx"],
+            ["eb", "pps ppt pptx"],
+          ].map(([name, exts]) => [name, exts.split(" ")]);
+          const lib = (name) => new Function(read(`${LIB}/${name}`))();
+          const markdown = lib("tiny-markdown-parser.js");
+          const { window } = new JSDOM('<!doctype html><body><article class="line-numbers"></article>', { runScripts: "outside-only" });
+          const { document } = window;
+          const viewer = document.querySelector("article");
+          const Prism = new window.Function(read(`${LIB}/prism.js`))();
+          const ORIGIN = "https://h";
+          let math;
+
+          const render = (html, page) => {
+            const doc = document.createElement("template");
+            doc.innerHTML = html;
+            for (const el of doc.content.querySelectorAll("script,iframe,frame,frameset,object,embed,applet")) el.remove();
+            for (const el of doc.content.querySelectorAll("*"))
+              for (const { name, value } of [...el.attributes])
+                if (/^on/i.test(name) || (/^(href|src|action|formaction|xlink:href)$/i.test(name) && /^(java|vb)script:/i.test(value.replace(/[\0-\x20]/g, ""))))
+                  el.removeAttribute(name);
+            if (page !== false)
+              for (const img of doc.content.querySelectorAll("img[src]")) {
+                if (img.parentElement?.localName === "picture") continue;
+                let path;
+                try {
+                  const url = new URL(img.getAttribute("src"), new URL(dirHref(page), ORIGIN));
+                  if (url.origin === ORIGIN || url.origin === SITE) path = decodeURIComponent(url.pathname.slice(1));
+                } catch {}
+                if (!variants[path]) continue;
+                const picture = document.createElement("picture");
+                for (const [type, file] of variants[path])
+                  picture.append(Object.assign(document.createElement("source"), { srcset: `/${encodeURI(file).replace(/,/g, "%2C")}`, type }));
+                img.replaceWith(picture);
+                picture.append(img);
+              }
+            const css = FEATURE_CSS.filter(([selector]) => doc.content.querySelector(selector));
+            viewer.replaceChildren(...css.map(([, href]) => Object.assign(document.createElement("link"), { rel: "stylesheet", href })), doc.content);
+            if (viewer.querySelector("pre")) Prism.highlightAllUnder(viewer);
+            for (const el of viewer.querySelectorAll("[class]")) {
+              const names = new Set();
+              let glyph = -1;
+              for (const c of el.classList) {
+                CLASSES[c]?.split(" ").forEach((n) => names.add(n));
+                if (c.startsWith("ext-")) glyph = Math.max(glyph, GLYPHS.findIndex(([, exts]) => exts.includes(c.slice(4))));
+              }
+              if (glyph >= 0) names.add(GLYPHS[glyph][0]);
+              const token = el.classList.contains("token");
+              if (names.size) el.className = [...names].join(" ");
+              else {
+                el.removeAttribute("class");
+                if (token && !el.attributes.length) el.replaceWith(...el.childNodes);
+              }
+            }
+            return viewer.innerHTML;
+          };
+          const articles = new Map();
+          for (const path of [...[...pages.values()].flatMap((p) => p.src ?? []), ...(existsSync("404.md") ? ["404.md"] : [])]) {
+            const text = read(path);
+            const lang = langOf(path);
+            if (lang === "markdown" && !math && markdown.findMath(text).length) {
+              const wasm = lib("math_core_wasm.js");
+              wasm.initSync(readFileSync(`${LIB}/math_core_wasm_bg.wasm`));
+              const engine = new wasm.LatexToMathML({ prettyPrint: "never", throwOnError: false, annotation: true });
+              math = (latex, display) => engine.convert_with_local_state(latex, display);
+            }
+            const html =
+              lang === "markdown"
+                ? render(markdown.parse(text, math && { math }), pageOf(path))
+                : render(`<pre><code class="language-${lang}">${esc(text)}</code></pre>`, false);
+            articles.set(path, await minify(`<article>${html}</article>`, HTML));
+          }
+          window.close();
+
+          const ICONS = Object.fromEntries(
+            Object.entries({
+              text: "txt log",
+              quill: "md markdown",
+              layout: "css scss sass less",
+              world1: "html htm xhtml",
+              xml: "xml xsl xslt",
+              svg: "svg",
+              image2: "png jpg jpeg gif webp avif bmp ico tif tiff",
+              c: "c h cpp hpp cc hh cxx hxx cs mm",
+              f: "f for f90 f95 f03 f08",
+              p: "py pyw pyi pl pm php pas",
+              tex: "tex sty cls bib ltx",
+              patch: "v sv svh vhd vhdl hdl",
+              "comp.blue": "asm nasm s ld wat wast gcode",
+              screw2: "json json5 jsonc webmanifest yaml yml toml ini cfg conf service socket timer mk cmake gradle dockerfile nix",
+              image3: "csv tsv xls xlsx ods mmd mermaid",
+              diskimg: "sql db sqlite iso dmg img",
+              transfer: "diff patch http",
+              "generic.sec": "pem key crt cer asc gpg sig",
+              a: "woff woff2 ttf otf eot",
+              ps: "ps eps ai",
+              dvi: "dvi",
+              pdf: "pdf",
+              sound2: "mp3 wav ogg oga flac m4a aac opus",
+              movie: "mp4 m4v mov webm avi mkv ogv",
+              compressed: "zip gz tgz bz2 xz 7z rar zst z",
+              tar: "tar",
+              box1: "deb rpm apk jar whl",
+              binary: "bin exe dll so o class wasm",
+              binhex: "hqx",
+              uu: "uu uue",
+            }).flatMap(([icon, exts]) => exts.split(" ").map((ext) => [ext, icon])),
+          );
+          const day = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          const sizeOf = (n) => {
+            if (n < 1024) return String(n);
+            let v = n / 1024, u = 0;
+            while (v >= 1024 && u < 2) (v /= 1024), u++;
+            return (v < 10 ? v.toFixed(1) : Math.round(v)) + "KMG"[u];
+          };
+          const dated = (s) => {
+            if (!s) return;
+            const [y, m, d] = s.split("-");
+            return new Date(y, m - 1, d);
+          };
+
+          let ids = 0;
+          const folder = (name, entries, fallback) => {
+            let n = ids++ + 8, id = "";
+            do id = String.fromCharCode(65 + (n % 26)) + id;
+            while ((n = Math.floor(n / 26) - 1) >= 0);
+            return { id, name, entries, mtime: newest(entries.map((e) => e.mtime)) ?? fallback, bytes: -1 };
+          };
+          const file = (path, e = {}) => {
+            const stat = statSync(path, { throwIfNoEntry: false });
+            const md = stat && langOf(path) === "markdown";
+            return {
+              name: e.name ?? basename(path),
+              href: langOf(path) ? dirHref(pageOf(path)) : `/${encodeURI(path)}`,
+              blank: !langOf(path),
+              icon: e.icon ?? (/^(rss|atom|feed)\.xml$/i.test(basename(path)) ? "rss" : (ICONS[extOf(path)] ?? (langOf(path) ? "script" : "text"))),
+              doc: stat && langOf(path) ? path : undefined,
+              mtime: (md && born(path) && new Date(born(path) * 1000)) || stat?.mtime || dated(e.date),
+              bytes: stat?.size ?? -1,
+              description: e.description ?? (md ? titleOf(read(path)) : undefined),
+            };
+          };
+          const tree = (dir, inside) =>
+            readdirSync(dir, { withFileTypes: true })
+              .filter((d) => d.name[0] !== ".")
+              .flatMap((d) => {
+                const path = `${dir}/${d.name}`;
+                if (!d.isDirectory()) return [file(path)];
+                return inside ? tree(path, true) : [folder(`${d.name}/`, tree(path, true), mtime(path))];
+              });
+          const LISTINGS = new Map();
+          for (const dir of DIRS) {
+            ids = 0;
+            LISTINGS.set(dir, tree(dir));
+          }
+          const entry = (inside) => (e) => {
+            if (typeof e === "string") e = { href: e };
+            if (e.entries) return inside ? e.entries.flatMap(entry(true)) : [folder(e.name, e.entries.flatMap(entry(true)))];
+            if (SCHEME.test(e.href))
+              return [
+                {
+                  name: e.name ?? e.href,
+                  href: e.href,
+                  blank: /^https?:/i.test(e.href),
+                  icon: e.icon ?? "text",
+                  ring: "prev" in e || "next" in e ? [e.prev ?? "", e.next ?? ""] : undefined,
+                  mtime: dated(e.date),
+                  bytes: e.href.length,
+                  description: e.description,
+                },
+              ];
+            if (!e.href.endsWith("/")) return [file(e.href, e)];
+            const dir = e.href.slice(0, -1);
+            const nodes = LISTINGS.get(dir);
+            return [
+              {
+                name: e.name ?? `${basename(dir)}/`,
+                href: dirHref(dir),
+                icon: e.icon ?? "folder",
+                mtime: newest(nodes.map((n) => n.mtime)) ?? mtime(dir),
+                bytes: -1,
+                description: e.description,
+              },
+            ];
+          };
+          ids = 0;
+          LISTINGS.set("", routes.flatMap(entry(false)));
+
+          const collator = new Intl.Collator("en", { numeric: true });
+          const KEYS = {
+            a: (x, y) => collator.compare(x.name, y.name),
+            b: (x, y) => (x.mtime ?? 0) - (y.mtime ?? 0) || KEYS.a(x, y),
+            c: (x, y) => x.bytes - y.bytes || KEYS.a(x, y),
+            e: (x, y) => collator.compare(x.description ?? "", y.description ?? "") || KEYS.a(x, y),
+          };
+          const arrange = (nodes) => {
+            const all = nodes.flatMap((n) => [n, ...(n.entries ?? [])]);
+            for (const n of all) n.order = {};
+            for (const key of all.some((n) => n.description) ? "abce" : "abc") {
+              let i = 0;
+              const number = (list) =>
+                [...list].sort(KEYS[key]).forEach((n) => {
+                  n.order[key] = i++;
+                  if (n.entries) number(n.entries);
+                });
+              number(nodes);
+            }
+            const place = (list, depth) =>
+              [...list]
+                .sort(KEYS.b)
+                .reverse()
+                .map((n) => {
+                  n.depth = depth;
+                  if (n.entries) n.entries = place(n.entries, depth + 1);
+                  return n;
+                });
+            return place(nodes, 0);
+          };
+
+          const NBSP = " ";
+          const img = (name, alt = "IMG") => `<img alt=[${alt}] src=/icons/${name}.gif>`;
+          const anchor = (n) => `<a${attr("href", n.href)}${n.blank ? " target=_blank" : ""}>${esc(n.name)}</a>`;
+          const row = (parent, icon, name, n) => {
+            const style = n.order && [...Object.entries(n.order).map(([key, v]) => `--${key}:${v}`), n.depth && `--d:${n.depth}`, n.entries?.length && `--z:${n.entries.length + 1}`];
+            return (
+              `<tr${parent ? ` class=${parent}` : ""}${style ? ` style=${style.filter(Boolean).join(";")}` : ""}>` +
+              `<td>${icon}<td>${name}<td>${n.mtime ? day(n.mtime) : NBSP}<td>${n.bytes < 0 ? "-" : sizeOf(n.bytes)}<td>${n.description ? esc(n.description) : NBSP}`
+            );
+          };
+          const rows = (nodes, open, parent = "") =>
+            nodes
+              .map((n) => {
+                const cell = (icon, name) => (parent ? row(parent, "", icon + name, n) : row("", icon, name, n));
+                if (n.entries)
+                  return (
+                    cell(`<label><input${n.id === open ? " checked" : ""} id=${n.id} type=checkbox>${img("folder")}${img("folder.open")}</label>`, `<label for=${n.id}>${esc(n.name)}</label>`) +
+                    rows(n.entries, open, n.id)
+                  );
+                if (n.ring) return row(parent, "", `<a${attr("href", n.ring[0])}>${img("hand.right")}</a>${anchor(n)}<a${attr("href", n.ring[1])}>${img("hand.right")}</a>`, n);
+                return cell(img(n.icon), anchor(n));
+              })
+              .join("");
+
+          const ascii = (text) => /^[\x20-\x7e]+$/.test(text);
+          const heading = (dir, parts) => {
+            const link = (href, html) => `<a${attr("href", href)}>${html}</a>`;
+            const segs = dir.split("/").filter(Boolean);
+            const hrefs = ["/", ...segs.map((_, i) => dirHref(segs.slice(0, i + 1).join("/")))];
+            const here = hrefs.at(-1);
+            const crumbs = segs.map((f, i) => ` <span>${link(hrefs[i], "<i>/ </i>")}${link(hrefs[i + 1], esc(f))}</span>`).join("");
+            if (!parts) return `${crumbs} ${link(here, "<i>/</i>")}`;
+            const name = parts.at(-1);
+            const typed = ascii(name) ? [...name].map((c, i) => `<u style=--d:${i + 1}>${esc(c)}</u>`).join("") : esc(name);
+            const chunks = parts.map((part, i) => {
+              const slash = i ? "<i>/ </i>" : "";
+              return i < parts.length - 1 ? `<b>${link(here, slash + esc(part))}</b> ` : `<b>${i ? link(here, slash) : ""}${typed}</b>`;
+            });
+            return `${crumbs} <span>${link(here, "<i>/ </i>")}${chunks[0]}</span>${chunks.slice(1).join("")}`;
+          };
+
+          const shell = read(".github/workflows/template.html").trim();
+          const page = ({ listing, path, name, open, doc, noindex }) => {
+            const vars = { title: `~/${name ? [listing.dir, ...name].filter(Boolean).join("/") : listing.dir && `${listing.dir}/`}`, url: SITE + dirHref(path), description: descriptions.get(doc) ?? DESCRIPTION };
+            const slots = {
+              head: (noindex ? "<meta content=noindex name=robots>" : "") + listing.style,
+              h1: name && ascii(name.at(-1)) ? ` style=--n:${name.at(-1).length}` : "",
+              crumbs: heading(listing.dir, name),
+              article: doc
+                ? articles
+                    .get(doc)
+                    .replace(/(\s(?:href|src)=)("[^"]*"|[^\s>]*)/g, (_, key, value) =>
+                      key + value.replace(/\{\{(\w+)\}\}/g, (all, k) => (k in vars ? encodeURIComponent(vars[k]) : all)),
+                    )
+                : "",
+              parent: listing.parent,
+              rows: (listing.rows[open] ??= rows(listing.nodes, open)),
+            };
+            return shell.replace(/(=?)\{\{(\w+)\}\}/g, (_, eq, key) => (key in vars ? (eq ? eq + quote(vars[key]) : esc(vars[key])) : eq + slots[key]));
+          };
+
+          const specs = [];
+          for (const [dir, nodes] of LISTINGS) {
+            const folders = nodes.filter((n) => n.entries).map((n) => n.id);
+            const up = dirname(dir) === "." ? "" : dirname(dir);
+            const listing = {
+              dir,
+              nodes: arrange(nodes),
+              rows: {},
+              style: folders.length
+                ? `<style>${folders.map((id) => `table:has(#${id}:not(:checked)) .${id}`).join()}{display:none}` +
+                  `@media (min-width:1414px){${folders.map((id) => `body:has(>article) table:has(#${id}:not(:checked)) .${id}`).join()}{display:grid;visibility:hidden;height:0}}</style>`
+                : "",
+              parent: dir ? row("", img("back", "PARENTDIR"), `<a${attr("href", dirHref(up))}>Parent Directory</a>`, { bytes: -1 }) : "",
+            };
+            specs.push({ listing, path: dir, name: README[dir] && ["README.md"], doc: README[dir] });
+            for (const n of nodes)
+              for (const [c, parent] of n.entries ? n.entries.map((c) => [c, n]) : [[n]])
+                if (c.doc && c.doc !== README[dir])
+                  specs.push({ listing, path: pageOf(c.doc), name: [...(parent ? [parent.name.replace(/\/$/, "")] : []), basename(c.doc)], open: parent?.id, doc: c.doc });
+          }
+          const paths = new Set();
+          for (const { path } of specs) {
+            if (paths.has(path)) fail("10", path);
+            paths.add(path);
+            if (existsSync(`${path || "."}/index.html`)) fail("12", `${path || "."}/index.html`);
+            if (path && !LISTINGS.has(path) && existsSync(path)) fail("11", path);
+          }
+          if (articles.has("404.md")) {
+            if (existsSync("404.html")) fail("12", "404.html");
+            specs.push({ listing: specs.find((s) => s.path === "").listing, path: "", name: ["404.md"], doc: "404.md", noindex: true, out: "404.html" });
+          }
+          for (const spec of specs) {
+            mkdirSync(spec.path || ".", { recursive: true });
+            writeFileSync(spec.out ?? `${spec.path || "."}/index.html`, page(spec));
+          }
+          EOF
+
+      - name: Admin
+        env:
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          node --input-type=module <<'EOF'
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { createHash, randomBytes, webcrypto } from "node:crypto";
+          import { createRequire } from "node:module";
+
+          const { minify } = createRequire(`${process.env.RUNNER_TEMP}/deps/`)("html-minifier-terser");
+          const { ADMIN_PASSWORD: password = "", ADMIN_TOKEN: token = "", GITHUB_REPOSITORY: repo, GITHUB_REF_NAME: branch } = process.env;
+          const fail = (code) => {
+            throw new Error(`시스템 오류. ${code}`);
+          };
+          const b64 = (bytes) => Buffer.from(bytes).toString("base64");
+
+          let vault = null;
+          if (!password || !token) console.log("::warning::시스템 오류. 30");
+          else if (password.length < 16) console.log("::warning::시스템 오류. 31");
+          else {
+            const { subtle } = webcrypto;
+            const salt = randomBytes(16);
+            const iv = randomBytes(12);
+            const iter = 1_000_000;
+            const base = await subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+            const key = await subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+            const ct = await subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify({ token, repo, branch })));
+            vault = { iter, salt: b64(salt), iv: b64(iv), ct: b64(ct) };
+          }
+
+          let html = await minify(readFileSync("admin.html", "utf8"), {
+            collapseWhitespace: true,
+            removeAttributeQuotes: true,
+            removeOptionalTags: true,
+            collapseBooleanAttributes: true,
+            decodeEntities: true,
+            removeRedundantAttributes: true,
+            sortAttributes: true,
+            sortClassName: true,
+            minifyCSS: true,
+            minifyJS: { module: true },
+          });
+          const VAULT = /(<script[^>]*\sid="?vault"?[^>]*>)[^<]*(<\/script>)/;
+          if (!VAULT.test(html)) fail("32");
+          html = html.replace(VAULT, (_, open, close) => open + JSON.stringify(vault) + close);
+          const script = html.match(/<script[^>]*\stype="?module"?[^>]*>([\s\S]*?)<\/script>/)?.[1];
+          if (script === undefined) fail("33");
+          const CSP = /script-src (?:'sha256-[^']*' )?'unsafe-inline'/;
+          if (!CSP.test(html)) fail("34");
+          writeFileSync("admin.html", html.replace(CSP, `script-src 'sha256-${createHash("sha256").update(script, "utf8").digest("base64")}' 'unsafe-inline'`));
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

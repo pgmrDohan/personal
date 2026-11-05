@@ -1,0 +1,59 @@
+/* TEAM */
+	Developer: Dohan Kwon
+	Contact: me [at] dohan.in
+	Site: https://www.dohan.in/
+	GitHub: pgmrDohan
+	ORCiD: 0009-0004-9091-3280
+	Discord: _dohan_
+	YouTube: @pgmrdohan
+	Instagram: @i70h4n
+
+/* THANKS */
+	MathCore: tmke8 (based on latex2mathml by Hiromu Sugiura)
+	Site: https://github.com/tmke8/math-core/
+	License: MIT
+
+	Prism.js: Lea Verou
+	Site: https://github.com/PrismJS/prism
+	License: MIT
+
+	Tiny Markdown Parser: mlshv (based on micro-down by Dustin Hagemeier)
+	Site: https://github.com/mlshv/tiny-markdown-parser
+	License: MIT
+
+	monogram (font): datagoblin
+	Site: https://datagoblin.itch.io/monogram
+	License: CC0 1.0
+
+	Galmuri (font): quiple
+	Site: https://quiple.dev/font/galmuri
+	License: SIL OFL 1.1
+
+	Departure Mono (font): Helena Zhang
+	Site: https://departuremono.com/
+	License: SIL OFL 1.1
+
+	MinecrafTeX (font): Chattelion Luo (based on Monocraft by Idrees Hassan)
+	Site: https://github.com/ChattelionLuo/MinecrafTeX
+	License: SIL OFL 1.1
+
+	Font Awesome 4 (treeview icons): Dave Gandy
+	Site: https://fontawesome.com/v4/
+	License: SIL OFL 1.1
+
+	Icons: Kevin Hughes, Andy Polyakov (Apache HTTP Server)
+	Site: https://www.apache.org/icons/
+	License: Public Domain
+
+	Full notices: https://www.dohan.in/THIRD_PARTY_NOTICES.txt
+
+/* SITE */
+	Last update: 2026/11/04
+	Language: English / Korean
+	Doctype: HTML5
+	Standards: HTML5, CSS3
+	Components: MathCore, Prism.js, Tiny Markdown Parser
+	Fonts: monogram, Galmuri, Departure Mono, MinecrafTeX
+	Feed: https://www.dohan.in/rss.xml
+	License: CC BY 4.0
+	IDE: Visual Studio Code
