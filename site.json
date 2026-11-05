@@ -1,24 +1,26 @@
 [
   "README.md",
   "journals/",
+  "projects/",
+  "papers/",
   { "href": "CV.pdf", "date": "2026-10-08" },
   {
     "name": "me(at)dohan.in",
     "href": "mailto:me@dohan.in",
     "icon": "mail",
-    "date": "2026-10-08"
+    "date": "2023-10-09"
   },
   {
     "name": "pgmrDohan@github",
     "href": "https://github.com/pgmrDohan",
     "icon": "github",
-    "date": "2026-10-08"
+    "date": "2020-03-06"
   },
   {
     "name": "0009-0004-9091-3280@ORCiD",
     "href": "https://orcid.org/0009-0004-9091-3280",
     "icon": "orcid",
-    "date": "2026-10-08"
+    "date": "2025-10-20"
   },
   "rss.xml",
   {
@@ -36,19 +38,19 @@
         "name": "_dohan_@discord",
         "href": "https://discord.gg/dbqcFRdtHX",
         "icon": "discord",
-        "date": "2026-10-08"
+        "date": "2022-09-05"
       },
       {
         "name": "pgmrdohan@youtube",
         "href": "https://www.youtube.com/@pgmrdohan",
         "icon": "youtube",
-        "date": "2026-10-08"
+        "date": "2022-10-31"
       },
       {
         "name": "i70h4n@instagram",
         "href": "https://www.instagram.com/i70h4n/",
         "icon": "instagram",
-        "date": "2026-10-08"
+        "date": "2023-04-25"
       }
     ]
   },
@@ -60,21 +62,21 @@
         "href": "https://hotlinewebring.club/",
         "prev": "https://hotlinewebring.club/dohan/previous",
         "next": "https://hotlinewebring.club/dohan/next",
-        "date": "2026-10-08"
+        "date": "2026-11-05"
       },
       {
         "name": "NO-AI",
         "href": "https://baccyflap.com/noai",
         "prev": "https://baccyflap.com/noai/?prv&s=dhk",
         "next": "https://baccyflap.com/noai/?nxt&s=dhk",
-        "date": "2026-10-08"
+        "date": "2026-11-05"
       },
       {
         "name": "retronaut",
         "href": "https://webring.dinhe.net/",
         "prev": "https://webring.dinhe.net/prev/https://www.dohan.in/",
         "next": "https://webring.dinhe.net/next/https://www.dohan.in/",
-        "date": "2026-10-08"
+        "date": "2026-11-05"
       }
     ]
   },
@@ -86,63 +88,63 @@
         "name": "Script:MathCore@tmke8",
         "href": "https://github.com/tmke8/math-core",
         "icon": "script",
-        "date": "2026-10-08",
+        "date": "2026-11-02",
         "description": "MIT License"
       },
       {
         "name": "Script:Prism.js@LeaVerou",
         "href": "https://github.com/PrismJS/prism",
         "icon": "script",
-        "date": "2026-10-08",
+        "date": "2025-03-11",
         "description": "MIT License"
       },
       {
         "name": "Script:TinyMarkdownParser@mlshv",
         "href": "https://github.com/mlshv/tiny-markdown-parser",
         "icon": "script",
-        "date": "2026-10-08",
+        "date": "2023-06-07",
         "description": "MIT License"
       },
       {
         "name": "Font:monogram@datagoblin",
         "href": "https://datagoblin.itch.io/monogram",
         "icon": "image1",
-        "date": "2026-10-08",
+        "date": "2024-03-15",
         "description": "CC0 1.0"
       },
       {
         "name": "Font:Galmuri@quiple",
         "href": "https://quiple.dev/font/galmuri",
         "icon": "image1",
-        "date": "2026-10-08",
+        "date": "2026-07-12",
         "description": "SIL OFL 1.1"
       },
       {
         "name": "Font:DepartureMono@HelenaZhang",
         "href": "https://departuremono.com/",
         "icon": "image1",
-        "date": "2026-10-08",
+        "date": "2025-05-26",
         "description": "SIL OFL 1.1"
       },
       {
         "name": "Font:MinecrafTeX@ChattelionLuo",
         "href": "https://github.com/ChattelionLuo/MinecrafTeX",
         "icon": "image1",
-        "date": "2026-10-08",
+        "date": "2026-06-19",
         "description": "SIL OFL 1.1"
       },
       {
         "name": "Font:Monocraft@IdreesHassan",
         "href": "https://github.com/IdreesInc/Monocraft",
         "icon": "image1",
-        "date": "2026-11-04",
+        "date": "2025-12-07",
         "description": "SIL OFL 1.1"
       },
       {
         "name": "Icon:FontAwesome@DaveGandy",
         "href": "https://fontawesome.com/v4/",
         "icon": "image2",
-        "date": "2026-11-04",
+        "date": "2016-10-24",
         "description": "SIL OFL 1.1"
       },
       {
