@@ -6,6 +6,8 @@
 
 글 끝에 있는 [웹 배지](https://www.dohan.in/journals/etc/88x31/)를 눌러 Github Issue 작성으로 글에 의견을 남길 수 있습니다.<br/>오타나 틀린 정보를 발견한다면 위의 방법이나 [~/README.md](https://www.dohan.in/)에 있는 연락 방법 중 하나를 통해 알려주시면 감사드리겠습니다.
 
+<br/>
+
 I write down my experiences while doing various things. (~~And my daily life, too~~)
 
 Most posts are in Korean,<br/>but some are in other languages to share with global communities.
@@ -16,4 +18,4 @@ If you find any typos or wrong info, please let me know through the badge or one
 
 ---
 
-[![best-sites](/images/88x31/best-sites.gif)](https://github.com/pgmrDohan/personal/issues/new?title={{title}}&body=Leave%20a%20message.&labels=guestbook&assignees=pgmrDohan)
+[![guestbook](/images/88x31/guestbook.gif)](https://github.com/pgmrDohan/personal/issues/new?title={{title}}&body=Leave%20a%20message.&labels=guestbook&assignees=pgmrDohan)
