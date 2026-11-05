@@ -16,4 +16,4 @@ If you find any typos or wrong info, please let me know through the badge or one
 
 ---
 
-[![best-sites](/images/88x31/best-sites.gif)](https://github.com/pgmrDohan/personal/issues/new?title={{title}}&body=Leave%20a%20message.&labels=comment&assignees=pgmrDohan)
+[![best-sites](/images/88x31/best-sites.gif)](https://github.com/pgmrDohan/personal/issues/new?title={{title}}&body=Leave%20a%20message.&labels=guestbook&assignees=pgmrDohan)
