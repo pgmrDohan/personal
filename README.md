@@ -16,7 +16,7 @@ Hello Hola こんにちは Bonjour Ciao
 <br/>
 
 
-<div style="display:flex;justify-content:space-between;align-items:center;"><img src="/images/profile2.jpg" width="160" style="flex-shrink:0" /><div style="padding-left:1rem">
+<div style="display:flex;justify-content:space-between;align-items:center;min-width: max-content;"><img src="/images/profile2.jpg" width="160" /><div style="padding-left:1rem">
 ## I am Do-han Kwon,
 someone who pours his whole heart into everything.
 
